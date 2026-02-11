@@ -1,0 +1,12 @@
+[Unit]
+Description=Lilith Browser ingest (Vivaldi history and bookmarks)
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Replace /path/to/lilith-browser with your project root (e.g. /home/user/code/lilith-browser).
+EnvironmentFile=/path/to/lilith-browser/.env
+WorkingDirectory=/path/to/lilith-browser
+ExecStart=/path/to/lilith-browser/.venv/bin/python main.py ingest --skip-embed
+StandardOutput=journal
+StandardError=journal

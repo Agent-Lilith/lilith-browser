@@ -1,0 +1,8 @@
+# Optional: same style as lilith-gmail (commented / minimal)
+# services:
+#   mcp:
+#     build: .
+#     environment:
+#       DATABASE_URL: postgresql+psycopg://lilith:pass@host:6100/lilith_browser
+#       EMBEDDING_URL: http://embed:6003
+#     command: uv run python main.py mcp --transport streamable-http --port 8001
