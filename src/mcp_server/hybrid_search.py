@@ -104,87 +104,13 @@ def _bookmark_to_result(bm: Bookmark, scores: dict[str, float], methods: list[st
     }
 
 
-class HybridHistorySearchEngine:
+from common.search import BaseHybridSearchEngine
+
+class HybridHistorySearchEngine(BaseHybridSearchEngine[HistoryEntry]):
     """Hybrid search over browser history: structured + fulltext + vector."""
 
-    def __init__(self, db: Session, embedder: Embedder) -> None:
-        self.db = db
-        self.embedder = embedder
-
-    def search(
-        self,
-        query: str = "",
-        methods: list[str] | None = None,
-        filters: list[dict[str, Any]] | None = None,
-        top_k: int = 10,
-    ) -> tuple[list[dict[str, Any]], dict[str, float], list[str]]:
-        """Returns (results, timing_ms, methods_executed)."""
-        top_k = _cap_limit(top_k)
-        if methods is None:
-            methods = self._auto_select(query, filters)
-
-        all_results: dict[int, dict] = {}  # id -> result data
-        timing_ms: dict[str, float] = {}
-        methods_executed: list[str] = []
-
-        if "structured" in methods and filters:
-            t0 = time.monotonic()
-            for entry, score in self._structured(filters, top_k):
-                eid = entry.id
-                if eid not in all_results:
-                    all_results[eid] = {"entry": entry, "scores": {}, "methods": []}
-                all_results[eid]["scores"]["structured"] = score
-                all_results[eid]["methods"].append("structured")
-            timing_ms["structured"] = round((time.monotonic() - t0) * 1000, 1)
-            methods_executed.append("structured")
-
-        if "fulltext" in methods and query.strip():
-            t0 = time.monotonic()
-            for entry, score in self._fulltext(query, filters, top_k):
-                eid = entry.id
-                if eid not in all_results:
-                    all_results[eid] = {"entry": entry, "scores": {}, "methods": []}
-                all_results[eid]["scores"]["fulltext"] = score
-                if "fulltext" not in all_results[eid]["methods"]:
-                    all_results[eid]["methods"].append("fulltext")
-            timing_ms["fulltext"] = round((time.monotonic() - t0) * 1000, 1)
-            methods_executed.append("fulltext")
-
-        if "vector" in methods and query.strip():
-            t0 = time.monotonic()
-            for entry, score in self._vector(query, filters, top_k):
-                eid = entry.id
-                if eid not in all_results:
-                    all_results[eid] = {"entry": entry, "scores": {}, "methods": []}
-                all_results[eid]["scores"]["vector"] = score
-                if "vector" not in all_results[eid]["methods"]:
-                    all_results[eid]["methods"].append("vector")
-            timing_ms["vector"] = round((time.monotonic() - t0) * 1000, 1)
-            methods_executed.append("vector")
-
-        # Fuse scores
-        weights = {"structured": 1.0, "fulltext": 0.85, "vector": 0.7}
-        scored: list[tuple[float, dict]] = []
-        for data in all_results.values():
-            total_w = sum(weights.get(m, 0.5) for m in data["scores"])
-            total_s = sum(data["scores"][m] * weights.get(m, 0.5) for m in data["scores"])
-            final = total_s / total_w if total_w > 0 else 0.0
-            result = _history_to_result(data["entry"], data["scores"], data["methods"])
-            scored.append((final, result))
-
-        scored.sort(key=lambda x: -x[0])
-        return [r for _, r in scored[:top_k]], timing_ms, methods_executed
-
-    def _auto_select(self, query: str, filters: list[dict] | None) -> list[str]:
-        methods = []
-        if filters:
-            methods.append("structured")
-        if query and query.strip():
-            methods.append("fulltext")
-            methods.append("vector")
-        if not methods:
-            methods = ["structured"]
-        return methods
+    def _get_item_id(self, item: HistoryEntry) -> int:
+        return item.id
 
     def _structured(self, filters: list[dict] | None, limit: int) -> list[tuple[HistoryEntry, float]]:
         stmt = select(HistoryEntry)
@@ -216,86 +142,18 @@ class HybridHistorySearchEngine:
         rows = self.db.execute(stmt).all()
         return [(row[0], max(0.0, min(1.0, 1.0 - float(row[1])))) for row in rows]
 
+    def _get_item_by_id(self, item_id: int, **kwargs) -> HistoryEntry | None:
+        return self.db.get(HistoryEntry, item_id)
 
-class HybridBookmarkSearchEngine:
+    def _format_result(self, item: HistoryEntry, scores: dict[str, float], methods: list[str]) -> dict[str, Any]:
+        return _history_to_result(item, scores, methods)
+
+
+class HybridBookmarkSearchEngine(BaseHybridSearchEngine[Bookmark]):
     """Hybrid search over bookmarks: structured + fulltext + vector."""
 
-    def __init__(self, db: Session, embedder: Embedder) -> None:
-        self.db = db
-        self.embedder = embedder
-
-    def search(
-        self,
-        query: str = "",
-        methods: list[str] | None = None,
-        filters: list[dict[str, Any]] | None = None,
-        top_k: int = 10,
-    ) -> tuple[list[dict[str, Any]], dict[str, float], list[str]]:
-        top_k = _cap_limit(top_k)
-        if methods is None:
-            methods = self._auto_select(query, filters)
-
-        all_results: dict[int, dict] = {}
-        timing_ms: dict[str, float] = {}
-        methods_executed: list[str] = []
-
-        if "structured" in methods and filters:
-            t0 = time.monotonic()
-            for bm, score in self._structured(filters, top_k):
-                bid = bm.id
-                if bid not in all_results:
-                    all_results[bid] = {"entry": bm, "scores": {}, "methods": []}
-                all_results[bid]["scores"]["structured"] = score
-                all_results[bid]["methods"].append("structured")
-            timing_ms["structured"] = round((time.monotonic() - t0) * 1000, 1)
-            methods_executed.append("structured")
-
-        if "fulltext" in methods and query.strip():
-            t0 = time.monotonic()
-            for bm, score in self._fulltext(query, filters, top_k):
-                bid = bm.id
-                if bid not in all_results:
-                    all_results[bid] = {"entry": bm, "scores": {}, "methods": []}
-                all_results[bid]["scores"]["fulltext"] = score
-                if "fulltext" not in all_results[bid]["methods"]:
-                    all_results[bid]["methods"].append("fulltext")
-            timing_ms["fulltext"] = round((time.monotonic() - t0) * 1000, 1)
-            methods_executed.append("fulltext")
-
-        if "vector" in methods and query.strip():
-            t0 = time.monotonic()
-            for bm, score in self._vector(query, filters, top_k):
-                bid = bm.id
-                if bid not in all_results:
-                    all_results[bid] = {"entry": bm, "scores": {}, "methods": []}
-                all_results[bid]["scores"]["vector"] = score
-                if "vector" not in all_results[bid]["methods"]:
-                    all_results[bid]["methods"].append("vector")
-            timing_ms["vector"] = round((time.monotonic() - t0) * 1000, 1)
-            methods_executed.append("vector")
-
-        weights = {"structured": 1.0, "fulltext": 0.85, "vector": 0.7}
-        scored: list[tuple[float, dict]] = []
-        for data in all_results.values():
-            total_w = sum(weights.get(m, 0.5) for m in data["scores"])
-            total_s = sum(data["scores"][m] * weights.get(m, 0.5) for m in data["scores"])
-            final = total_s / total_w if total_w > 0 else 0.0
-            result = _bookmark_to_result(data["entry"], data["scores"], data["methods"])
-            scored.append((final, result))
-
-        scored.sort(key=lambda x: -x[0])
-        return [r for _, r in scored[:top_k]], timing_ms, methods_executed
-
-    def _auto_select(self, query: str, filters: list[dict] | None) -> list[str]:
-        methods = []
-        if filters:
-            methods.append("structured")
-        if query and query.strip():
-            methods.append("fulltext")
-            methods.append("vector")
-        if not methods:
-            methods = ["structured"]
-        return methods
+    def _get_item_id(self, item: Bookmark) -> int:
+        return item.id
 
     def _structured(self, filters: list[dict] | None, limit: int) -> list[tuple[Bookmark, float]]:
         stmt = select(Bookmark)
@@ -326,3 +184,9 @@ class HybridBookmarkSearchEngine:
         stmt = stmt.order_by(dist, Bookmark.added_at.desc().nullslast()).limit(limit)
         rows = self.db.execute(stmt).all()
         return [(row[0], max(0.0, min(1.0, 1.0 - float(row[1])))) for row in rows]
+
+    def _get_item_by_id(self, item_id: int, **kwargs) -> Bookmark | None:
+        return self.db.get(Bookmark, item_id)
+
+    def _format_result(self, item: Bookmark, scores: dict[str, float], methods: list[str]) -> dict[str, Any]:
+        return _bookmark_to_result(item, scores, methods)

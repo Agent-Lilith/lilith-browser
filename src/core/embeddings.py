@@ -1,17 +1,10 @@
-import logging
-from typing import List, Union
-
-import httpx
-
+from common.embeddings import Embedder as SharedEmbedder
 from core.config import settings
 from core.models import EMBEDDING_DIM
 
-logger = logging.getLogger(__name__)
-
-
-class Embedder:
+class Embedder(SharedEmbedder):
     def __init__(self, endpoint_url: str | None = None) -> None:
-        self.endpoint_url = (endpoint_url or settings.EMBEDDING_URL or "").rstrip("/")
+        super().__init__(endpoint_url or settings.EMBEDDING_URL, dim=EMBEDDING_DIM)
         if not self.endpoint_url:
             logger.warning("EMBEDDING_URL not set; semantic search will fail")
         else:
