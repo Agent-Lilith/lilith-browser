@@ -19,11 +19,6 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def _create_index_concurrently(connection: object, index_sql: str) -> None:
-    """Run CREATE INDEX CONCURRENTLY outside a transaction (PostgreSQL requirement)."""
-    engine = connection.engine
-    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as ac_conn:
-        ac_conn.execute(text(index_sql))
 
 
 def upgrade() -> None:
@@ -40,9 +35,11 @@ def upgrade() -> None:
         )
     """)
 
-    _create_index_concurrently(
-        op.get_bind(),
-        "CREATE INDEX CONCURRENTLY ix_history_search_tsv ON history USING GIN (search_tsv)",
+    op.create_index(
+        "ix_history_search_tsv",
+        "history",
+        ["search_tsv"],
+        postgresql_using="gin",
     )
 
     op.execute("""
@@ -80,9 +77,11 @@ def upgrade() -> None:
         )
     """)
 
-    _create_index_concurrently(
-        op.get_bind(),
-        "CREATE INDEX CONCURRENTLY ix_bookmarks_search_tsv ON bookmarks USING GIN (search_tsv)",
+    op.create_index(
+        "ix_bookmarks_search_tsv",
+        "bookmarks",
+        ["search_tsv"],
+        postgresql_using="gin",
     )
 
     op.execute("""
