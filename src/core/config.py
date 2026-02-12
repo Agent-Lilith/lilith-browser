@@ -1,10 +1,14 @@
 from pathlib import Path
+
 from common.config import BaseAgentSettings
+
 
 class Settings(BaseAgentSettings):
     VIVALDI_HISTORY_PATH: str = ""
 
+
 settings = Settings()
+
 
 def get_vivaldi_profile_path() -> Path:
     """Resolved Vivaldi Default profile directory (History and Bookmarks live here)."""

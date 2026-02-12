@@ -2,13 +2,12 @@
 
 import logging
 import time
-from datetime import date, datetime, time as dtime
+from datetime import date, datetime
+from datetime import time as dtime
 from typing import Any
 
-from sqlalchemy import func, select, literal_column
-from sqlalchemy.orm import Session
+from sqlalchemy import func, literal_column, select
 
-from core.embeddings import Embedder
 from core.models import Bookmark, HistoryEntry
 
 logger = logging.getLogger(__name__)
@@ -40,9 +39,14 @@ def _apply_history_filters(stmt, filters: list[dict[str, Any]] | None):
         field = f.get("field", "")
         value = f.get("value")
         if field == "date_after" and value:
-            stmt = stmt.where(HistoryEntry.last_visit_time >= _parse_date_bound(str(value)))
+            stmt = stmt.where(
+                HistoryEntry.last_visit_time >= _parse_date_bound(str(value))
+            )
         elif field == "date_before" and value:
-            stmt = stmt.where(HistoryEntry.last_visit_time <= _parse_date_bound(str(value), end_of_day=True))
+            stmt = stmt.where(
+                HistoryEntry.last_visit_time
+                <= _parse_date_bound(str(value), end_of_day=True)
+            )
         elif field == "domain" and value:
             stmt = stmt.where(HistoryEntry.domain.ilike(f"%{value}%"))
     return stmt
@@ -61,18 +65,24 @@ def _apply_bookmark_filters(stmt, filters: list[dict[str, Any]] | None):
         elif field == "date_after" and value:
             stmt = stmt.where(Bookmark.added_at >= _parse_date_bound(str(value)))
         elif field == "date_before" and value:
-            stmt = stmt.where(Bookmark.added_at <= _parse_date_bound(str(value), end_of_day=True))
+            stmt = stmt.where(
+                Bookmark.added_at <= _parse_date_bound(str(value), end_of_day=True)
+            )
     return stmt
 
 
-def _history_to_result(entry: HistoryEntry, scores: dict[str, float], methods: list[str]) -> dict[str, Any]:
+def _history_to_result(
+    entry: HistoryEntry, scores: dict[str, float], methods: list[str]
+) -> dict[str, Any]:
     return {
         "id": str(entry.id),
         "source": "browser_history",
         "source_class": "personal",
         "title": entry.title or "No title",
         "snippet": entry.snippet or "",
-        "timestamp": entry.last_visit_time.isoformat() if entry.last_visit_time else None,
+        "timestamp": entry.last_visit_time.isoformat()
+        if entry.last_visit_time
+        else None,
         "scores": scores,
         "methods_used": methods,
         "metadata": {
@@ -85,7 +95,9 @@ def _history_to_result(entry: HistoryEntry, scores: dict[str, float], methods: l
     }
 
 
-def _bookmark_to_result(bm: Bookmark, scores: dict[str, float], methods: list[str]) -> dict[str, Any]:
+def _bookmark_to_result(
+    bm: Bookmark, scores: dict[str, float], methods: list[str]
+) -> dict[str, Any]:
     return {
         "id": str(bm.id),
         "source": "browser_bookmarks",
@@ -100,37 +112,114 @@ def _bookmark_to_result(bm: Bookmark, scores: dict[str, float], methods: list[st
             "folder": bm.folder or "",
             "type": "bookmark",
         },
-        "provenance": f"bookmarked in {bm.folder or 'root'}" + (f" on {bm.added_at.strftime('%Y-%m-%d')}" if bm.added_at else ""),
+        "provenance": f"bookmarked in {bm.folder or 'root'}"
+        + (f" on {bm.added_at.strftime('%Y-%m-%d')}" if bm.added_at else ""),
     }
 
 
 from common.search import BaseHybridSearchEngine
 
+
 class HybridHistorySearchEngine(BaseHybridSearchEngine[HistoryEntry]):
     """Hybrid search over browser history: structured + fulltext + vector."""
+
+    def __init__(self, db: Any, embedder: Any = None) -> None:
+        self.db = db
+        self.embedder = embedder
+
+    def search(
+        self,
+        query: str = "",
+        methods: list | None = None,
+        filters: list | None = None,
+        top_k: int = 10,
+    ):
+        methods = methods or ["structured", "fulltext", "vector"]
+        timing: dict[str, float] = {}
+        methods_executed: list[str] = []
+        all_results: dict[Any, dict[str, Any]] = {}
+
+        def add_batch(batch: list, method_name: str) -> None:
+            if not batch:
+                return
+            methods_executed.append(method_name)
+            for item, score in batch:
+                item_id = self._get_item_id(item)
+                if item_id not in all_results:
+                    all_results[item_id] = {"item": item, "scores": {}, "methods": []}
+                all_results[item_id]["scores"][method_name] = score
+                if method_name not in all_results[item_id]["methods"]:
+                    all_results[item_id]["methods"].append(method_name)
+
+        t_start = time.monotonic()
+        if "structured" in methods:
+            t0 = time.monotonic()
+            try:
+                add_batch(self._structured(filters, top_k * 2), "structured")
+            except Exception as e:
+                logger.warning("Structured search failed: %s", e)
+            timing["structured"] = round((time.monotonic() - t0) * 1000, 1)
+        if "fulltext" in methods and query and query.strip():
+            t0 = time.monotonic()
+            try:
+                add_batch(self._fulltext(query, filters, top_k * 2), "fulltext")
+            except Exception as e:
+                logger.warning("Fulltext search failed: %s", e)
+            timing["fulltext"] = round((time.monotonic() - t0) * 1000, 1)
+        if "vector" in methods and query and query.strip():
+            t0 = time.monotonic()
+            try:
+                add_batch(self._vector(query, filters, top_k * 2), "vector")
+            except Exception as e:
+                logger.warning("Vector search failed: %s", e)
+            timing["vector"] = round((time.monotonic() - t0) * 1000, 1)
+
+        fusion_results = []
+        for res in all_results.values():
+            final_score = max(res["scores"].values())
+            fusion_results.append(
+                (
+                    self._format_result(res["item"], res["scores"], res["methods"]),
+                    final_score,
+                )
+            )
+        fusion_results.sort(key=lambda x: x[1], reverse=True)
+        results = [x[0] for x in fusion_results[:top_k]]
+        timing["total"] = round((time.monotonic() - t_start) * 1000, 1)
+        return results, timing, methods_executed
 
     def _get_item_id(self, item: HistoryEntry) -> int:
         return item.id
 
-    def _structured(self, filters: list[dict] | None, limit: int) -> list[tuple[HistoryEntry, float]]:
+    def _structured(
+        self, filters: list[dict] | None, limit: int
+    ) -> list[tuple[HistoryEntry, float]]:
         stmt = select(HistoryEntry)
         stmt = _apply_history_filters(stmt, filters)
-        stmt = stmt.order_by(HistoryEntry.last_visit_time.desc().nullslast()).limit(limit)
+        stmt = stmt.order_by(HistoryEntry.last_visit_time.desc().nullslast()).limit(
+            limit
+        )
         rows = self.db.execute(stmt).scalars().all()
         return [(row, max(0.3, 1.0 - i * 0.03)) for i, row in enumerate(rows)]
 
-    def _fulltext(self, query: str, filters: list[dict] | None, limit: int) -> list[tuple[HistoryEntry, float]]:
+    def _fulltext(
+        self, query: str, filters: list[dict] | None, limit: int
+    ) -> list[tuple[HistoryEntry, float]]:
         tsquery = func.plainto_tsquery("simple", query)
         rank = func.ts_rank_cd(HistoryEntry.search_tsv, tsquery)
         stmt = select(HistoryEntry, rank.label("rank"))
         stmt = _apply_history_filters(stmt, filters)
         stmt = stmt.where(HistoryEntry.search_tsv.isnot(None))
         stmt = stmt.where(literal_column("search_tsv").op("@@")(tsquery))
-        stmt = stmt.order_by(rank.desc(), HistoryEntry.last_visit_time.desc().nullslast()).limit(limit)
+        stmt = stmt.order_by(
+            rank.desc(), HistoryEntry.last_visit_time.desc().nullslast()
+        ).limit(limit)
         rows = self.db.execute(stmt).all()
         return [(row[0], min(1.0, max(0.1, float(row[1])))) for row in rows]
 
-    def _vector(self, query: str, filters: list[dict] | None, limit: int) -> list[tuple[HistoryEntry, float]]:
+    def _vector(
+        self, query: str, filters: list[dict] | None, limit: int
+    ) -> list[tuple[HistoryEntry, float]]:
         embedding = self.embedder.encode_sync(query)
         if not embedding or not any(x != 0 for x in embedding):
             return []
@@ -138,42 +227,119 @@ class HybridHistorySearchEngine(BaseHybridSearchEngine[HistoryEntry]):
         stmt = select(HistoryEntry, dist.label("distance"))
         stmt = _apply_history_filters(stmt, filters)
         stmt = stmt.where(HistoryEntry.embedding.isnot(None))
-        stmt = stmt.order_by(dist, HistoryEntry.last_visit_time.desc().nullslast()).limit(limit)
+        stmt = stmt.order_by(
+            dist, HistoryEntry.last_visit_time.desc().nullslast()
+        ).limit(limit)
         rows = self.db.execute(stmt).all()
         return [(row[0], max(0.0, min(1.0, 1.0 - float(row[1])))) for row in rows]
 
     def _get_item_by_id(self, item_id: int, **kwargs) -> HistoryEntry | None:
         return self.db.get(HistoryEntry, item_id)
 
-    def _format_result(self, item: HistoryEntry, scores: dict[str, float], methods: list[str]) -> dict[str, Any]:
+    def _format_result(
+        self, item: HistoryEntry, scores: dict[str, float], methods: list[str]
+    ) -> dict[str, Any]:
         return _history_to_result(item, scores, methods)
 
 
 class HybridBookmarkSearchEngine(BaseHybridSearchEngine[Bookmark]):
     """Hybrid search over bookmarks: structured + fulltext + vector."""
 
+    def __init__(self, db: Any, embedder: Any = None) -> None:
+        self.db = db
+        self.embedder = embedder
+
+    def search(
+        self,
+        query: str = "",
+        methods: list | None = None,
+        filters: list | None = None,
+        top_k: int = 10,
+    ):
+        methods = methods or ["structured", "fulltext", "vector"]
+        timing: dict[str, float] = {}
+        methods_executed: list[str] = []
+        all_results: dict[Any, dict[str, Any]] = {}
+
+        def add_batch(batch: list, method_name: str) -> None:
+            if not batch:
+                return
+            methods_executed.append(method_name)
+            for item, score in batch:
+                item_id = self._get_item_id(item)
+                if item_id not in all_results:
+                    all_results[item_id] = {"item": item, "scores": {}, "methods": []}
+                all_results[item_id]["scores"][method_name] = score
+                if method_name not in all_results[item_id]["methods"]:
+                    all_results[item_id]["methods"].append(method_name)
+
+        t_start = time.monotonic()
+        if "structured" in methods:
+            t0 = time.monotonic()
+            try:
+                add_batch(self._structured(filters, top_k * 2), "structured")
+            except Exception as e:
+                logger.warning("Structured search failed: %s", e)
+            timing["structured"] = round((time.monotonic() - t0) * 1000, 1)
+        if "fulltext" in methods and query and query.strip():
+            t0 = time.monotonic()
+            try:
+                add_batch(self._fulltext(query, filters, top_k * 2), "fulltext")
+            except Exception as e:
+                logger.warning("Fulltext search failed: %s", e)
+            timing["fulltext"] = round((time.monotonic() - t0) * 1000, 1)
+        if "vector" in methods and query and query.strip():
+            t0 = time.monotonic()
+            try:
+                add_batch(self._vector(query, filters, top_k * 2), "vector")
+            except Exception as e:
+                logger.warning("Vector search failed: %s", e)
+            timing["vector"] = round((time.monotonic() - t0) * 1000, 1)
+
+        fusion_results = []
+        for res in all_results.values():
+            final_score = max(res["scores"].values())
+            fusion_results.append(
+                (
+                    self._format_result(res["item"], res["scores"], res["methods"]),
+                    final_score,
+                )
+            )
+        fusion_results.sort(key=lambda x: x[1], reverse=True)
+        results = [x[0] for x in fusion_results[:top_k]]
+        timing["total"] = round((time.monotonic() - t_start) * 1000, 1)
+        return results, timing, methods_executed
+
     def _get_item_id(self, item: Bookmark) -> int:
         return item.id
 
-    def _structured(self, filters: list[dict] | None, limit: int) -> list[tuple[Bookmark, float]]:
+    def _structured(
+        self, filters: list[dict] | None, limit: int
+    ) -> list[tuple[Bookmark, float]]:
         stmt = select(Bookmark)
         stmt = _apply_bookmark_filters(stmt, filters)
         stmt = stmt.order_by(Bookmark.added_at.desc().nullslast()).limit(limit)
         rows = self.db.execute(stmt).scalars().all()
         return [(row, max(0.3, 1.0 - i * 0.03)) for i, row in enumerate(rows)]
 
-    def _fulltext(self, query: str, filters: list[dict] | None, limit: int) -> list[tuple[Bookmark, float]]:
+    def _fulltext(
+        self, query: str, filters: list[dict] | None, limit: int
+    ) -> list[tuple[Bookmark, float]]:
         tsquery = func.plainto_tsquery("simple", query)
         rank = func.ts_rank_cd(Bookmark.search_tsv, tsquery)
         stmt = select(Bookmark, rank.label("rank"))
         stmt = _apply_bookmark_filters(stmt, filters)
         stmt = stmt.where(Bookmark.search_tsv.isnot(None))
         stmt = stmt.where(literal_column("search_tsv").op("@@")(tsquery))
-        stmt = stmt.order_by(rank.desc(), Bookmark.added_at.desc().nullslast()).limit(limit)
+        stmt = stmt.order_by(rank.desc(), Bookmark.added_at.desc().nullslast()).limit(
+            limit
+        )
         rows = self.db.execute(stmt).all()
         return [(row[0], min(1.0, max(0.1, float(row[1])))) for row in rows]
 
-    def _vector(self, query: str, filters: list[dict] | None, limit: int) -> list[tuple[Bookmark, float]]:
+    def _vector(
+        self, query: str, filters: list[dict] | None, limit: int
+    ) -> list[tuple[Bookmark, float]]:
         embedding = self.embedder.encode_sync(query)
         if not embedding or not any(x != 0 for x in embedding):
             return []
@@ -188,5 +354,7 @@ class HybridBookmarkSearchEngine(BaseHybridSearchEngine[Bookmark]):
     def _get_item_by_id(self, item_id: int, **kwargs) -> Bookmark | None:
         return self.db.get(Bookmark, item_id)
 
-    def _format_result(self, item: Bookmark, scores: dict[str, float], methods: list[str]) -> dict[str, Any]:
+    def _format_result(
+        self, item: Bookmark, scores: dict[str, float], methods: list[str]
+    ) -> dict[str, Any]:
         return _bookmark_to_result(item, scores, methods)

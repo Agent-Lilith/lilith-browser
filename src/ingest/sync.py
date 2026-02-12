@@ -1,7 +1,8 @@
 """Upsert Vivaldi data into Postgres and optional embedding backfill."""
+
 import hashlib
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -37,7 +38,7 @@ def upsert_history(db: Session, rows: list[dict]) -> int:
             existing.domain = r.get("domain") or None
             existing.last_visit_time = r.get("last_visit_time")
             existing.visit_count = r.get("visit_count", 0)
-            existing.updated_at = datetime.now(timezone.utc)
+            existing.updated_at = datetime.now(UTC)
         else:
             db.add(
                 HistoryEntry(
@@ -71,7 +72,7 @@ def upsert_bookmarks(db: Session, rows: list[dict]) -> int:
         if existing:
             existing.title = r.get("title")
             existing.added_at = r.get("added_at")
-            existing.updated_at = datetime.now(timezone.utc)
+            existing.updated_at = datetime.now(UTC)
         else:
             db.add(
                 Bookmark(
@@ -89,13 +90,19 @@ def upsert_bookmarks(db: Session, rows: list[dict]) -> int:
 
 def embed_history_batch(db: Session, embedder: Embedder, batch_size: int = 50) -> int:
     """Compute embeddings for history rows where embedding is NULL. Returns count updated."""
-    rows = db.execute(
-        select(HistoryEntry).where(
-            HistoryEntry.browser == BROWSER,
-            HistoryEntry.embedding.is_(None),
-            HistoryEntry.deleted_at.is_(None),
-        ).limit(batch_size)
-    ).scalars().all()
+    rows = (
+        db.execute(
+            select(HistoryEntry)
+            .where(
+                HistoryEntry.browser == BROWSER,
+                HistoryEntry.embedding.is_(None),
+                HistoryEntry.deleted_at.is_(None),
+            )
+            .limit(batch_size)
+        )
+        .scalars()
+        .all()
+    )
     entries = list(rows)
     if not entries:
         return 0
@@ -107,16 +114,18 @@ def embed_history_batch(db: Session, embedder: Embedder, batch_size: int = 50) -
         return 0
     if not isinstance(vectors, list) or len(vectors) != len(entries):
         return 0
-    now = datetime.now(timezone.utc)
-    for e, vec in zip(entries, vectors):
+    now = datetime.now(UTC)
+    for entry, vec in zip(entries, vectors, strict=True):
         if isinstance(vec, list) and len(vec) == EMBEDDING_DIM:
-            e.embedding = vec
-            e.embedding_computed_at = now
+            entry.embedding = vec
+            entry.embedding_computed_at = now
     db.flush()
     return len(entries)
 
 
-def run_embedding_backfill(db: Session, embedder: Embedder, batch_size: int = 50) -> tuple[int, int]:
+def run_embedding_backfill(
+    db: Session, embedder: Embedder, batch_size: int = 50
+) -> tuple[int, int]:
     """Run embedding backfill for history and bookmarks. Returns (history_count, bookmark_count)."""
     h_total, b_total = 0, 0
     while True:
@@ -134,13 +143,19 @@ def run_embedding_backfill(db: Session, embedder: Embedder, batch_size: int = 50
 
 def embed_bookmarks_batch(db: Session, embedder: Embedder, batch_size: int = 50) -> int:
     """Compute embeddings for bookmark rows where embedding is NULL. Returns count updated."""
-    rows = db.execute(
-        select(Bookmark).where(
-            Bookmark.browser == BROWSER,
-            Bookmark.embedding.is_(None),
-            Bookmark.deleted_at.is_(None),
-        ).limit(batch_size)
-    ).scalars().all()
+    rows = (
+        db.execute(
+            select(Bookmark)
+            .where(
+                Bookmark.browser == BROWSER,
+                Bookmark.embedding.is_(None),
+                Bookmark.deleted_at.is_(None),
+            )
+            .limit(batch_size)
+        )
+        .scalars()
+        .all()
+    )
     entries = list(rows)
     if not entries:
         return 0
@@ -152,10 +167,10 @@ def embed_bookmarks_batch(db: Session, embedder: Embedder, batch_size: int = 50)
         return 0
     if not isinstance(vectors, list) or len(vectors) != len(entries):
         return 0
-    now = datetime.now(timezone.utc)
-    for e, vec in zip(entries, vectors):
+    now = datetime.now(UTC)
+    for entry, vec in zip(entries, vectors, strict=True):
         if isinstance(vec, list) and len(vec) == EMBEDDING_DIM:
-            e.embedding = vec
-            e.embedding_computed_at = now
+            entry.embedding = vec
+            entry.embedding_computed_at = now
     db.flush()
     return len(entries)

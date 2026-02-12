@@ -1,4 +1,5 @@
 """CLI entry for lilith-browser: migrate, ingest, mcp."""
+
 import argparse
 import sys
 from pathlib import Path
@@ -11,12 +12,14 @@ console = Console(stderr=True)
 
 def cmd_migrate(_args: argparse.Namespace) -> int:
     import alembic.config
+
     alembic.config.main(argv=["upgrade", "head"])
     return 0
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
     import logging
+
     from core.config import get_vivaldi_profile_path
     from core.database import db_session
     from core.embeddings import Embedder
@@ -31,7 +34,11 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     )
     logger = logging.getLogger("ingest")
 
-    profile_dir = Path(args.profile).expanduser().resolve() if args.profile else get_vivaldi_profile_path()
+    profile_dir = (
+        Path(args.profile).expanduser().resolve()
+        if args.profile
+        else get_vivaldi_profile_path()
+    )
     if not profile_dir.is_dir():
         console.print(f"[red]Profile directory not found: {profile_dir}[/red]")
         return 1
@@ -49,7 +56,9 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     if not args.bookmarks_only:
         try:
             hist = read_history(profile_dir)
-            logger.info("Read %d history URLs from %s", len(hist), profile_dir / "History")
+            logger.info(
+                "Read %d history URLs from %s", len(hist), profile_dir / "History"
+            )
         except FileNotFoundError as e:
             console.print(f"[red]{e}[/red]")
             return 1
@@ -70,7 +79,9 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         if not args.skip_embed and (hist or bm):
             embedder = Embedder()
             if embedder.endpoint_url:
-                h_n, b_n = run_embedding_backfill(db, embedder, batch_size=args.embed_batch_size)
+                h_n, b_n = run_embedding_backfill(
+                    db, embedder, batch_size=args.embed_batch_size
+                )
                 logger.info("Embedding backfill: %d history, %d bookmarks", h_n, b_n)
             else:
                 logger.warning("EMBEDDING_URL not set; skipping embedding backfill")
@@ -79,7 +90,9 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
 def cmd_mcp(args: argparse.Namespace) -> int:
     from mcp_server.server import main as mcp_main
-    return mcp_main(transport=args.transport, port=args.port)
+
+    mcp_main(transport=args.transport, port=args.port)
+    return 0
 
 
 def main() -> int:
@@ -92,18 +105,44 @@ def main() -> int:
     mig_p = sub.add_parser("migrate", help="Run DB migrations (alembic upgrade head)")
     mig_p.set_defaults(func=cmd_migrate)
 
-    ingest_p = sub.add_parser("ingest", help="Ingest from Vivaldi (history + bookmarks)")
-    ingest_p.add_argument("--profile", metavar="PATH", help="Vivaldi profile directory (default: ~/.config/vivaldi/Default)")
-    ingest_p.add_argument("--history-only", action="store_true", help="Ingest only history")
-    ingest_p.add_argument("--bookmarks-only", action="store_true", help="Ingest only bookmarks")
-    ingest_p.add_argument("--skip-embed", action="store_true", help="Do not run embedding backfill (faster for cron)")
-    ingest_p.add_argument("--dry-run", action="store_true", help="Only read sources, do not write to DB")
-    ingest_p.add_argument("--embed-batch-size", type=int, default=50, metavar="N", help="Batch size for embedding (default: 50)")
+    ingest_p = sub.add_parser(
+        "ingest", help="Ingest from Vivaldi (history + bookmarks)"
+    )
+    ingest_p.add_argument(
+        "--profile",
+        metavar="PATH",
+        help="Vivaldi profile directory (default: ~/.config/vivaldi/Default)",
+    )
+    ingest_p.add_argument(
+        "--history-only", action="store_true", help="Ingest only history"
+    )
+    ingest_p.add_argument(
+        "--bookmarks-only", action="store_true", help="Ingest only bookmarks"
+    )
+    ingest_p.add_argument(
+        "--skip-embed",
+        action="store_true",
+        help="Do not run embedding backfill (faster for cron)",
+    )
+    ingest_p.add_argument(
+        "--dry-run", action="store_true", help="Only read sources, do not write to DB"
+    )
+    ingest_p.add_argument(
+        "--embed-batch-size",
+        type=int,
+        default=50,
+        metavar="N",
+        help="Batch size for embedding (default: 50)",
+    )
     ingest_p.set_defaults(func=cmd_ingest)
 
     mcp_p = sub.add_parser("mcp", help="Run MCP server")
-    mcp_p.add_argument("--transport", choices=["stdio", "streamable-http"], default="stdio")
-    mcp_p.add_argument("--port", type=int, default=8001, help="Port for streamable-http")
+    mcp_p.add_argument(
+        "--transport", choices=["stdio", "streamable-http"], default="stdio"
+    )
+    mcp_p.add_argument(
+        "--port", type=int, default=8001, help="Port for streamable-http"
+    )
     mcp_p.set_defaults(func=cmd_mcp)
 
     args = parser.parse_args()

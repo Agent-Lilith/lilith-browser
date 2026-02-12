@@ -1,15 +1,19 @@
 import logging
+
 from common.mcp import create_mcp_app, run_mcp_server
+
 from mcp_server.tools import get_search_capabilities_tool, search_browser_unified_tool
 
 logger = logging.getLogger("mcp_server")
 
 mcp = create_mcp_app("Lilith Browser")
 
+
 @mcp.tool()
 def search_capabilities() -> dict:
     """Return browser search capabilities (history, bookmarks)."""
     return get_search_capabilities_tool()
+
 
 @mcp.tool()
 def unified_search(
@@ -30,10 +34,6 @@ def unified_search(
         search_bookmarks=search_bookmarks,
     )
 
-def main():
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--transport", default="stdio")
-    parser.add_argument("--port", type=int, default=8001)
-    args, _ = parser.parse_known_args()
-    run_mcp_server(mcp, transport=args.transport, port=args.port)
+
+def main(transport: str = "stdio", port: int = 8001) -> None:
+    run_mcp_server(mcp, transport=transport, port=port)

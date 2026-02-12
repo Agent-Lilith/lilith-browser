@@ -1,6 +1,13 @@
+import logging
+
+import httpx
 from common.embeddings import Embedder as SharedEmbedder
+
 from core.config import settings
 from core.models import EMBEDDING_DIM
+
+logger = logging.getLogger(__name__)
+
 
 class Embedder(SharedEmbedder):
     def __init__(self, endpoint_url: str | None = None) -> None:
@@ -8,11 +15,13 @@ class Embedder(SharedEmbedder):
         if not self.endpoint_url:
             logger.warning("EMBEDDING_URL not set; semantic search will fail")
         else:
-            logger.info("Embedder: TEI at %s (dim=%s)", self.endpoint_url, EMBEDDING_DIM)
+            logger.info(
+                "Embedder: TEI at %s (dim=%s)", self.endpoint_url, EMBEDDING_DIM
+            )
 
     def _sync_post(
-        self, text: Union[str, List[str]], path: str = "/embed"
-    ) -> Union[List[float], List[List[float]]]:
+        self, text: str | list[str], path: str = "/embed"
+    ) -> list[float] | list[list[float]]:
         if not text:
             return [] if isinstance(text, list) else [0.0] * EMBEDDING_DIM
         if not self.endpoint_url:
@@ -31,7 +40,5 @@ class Embedder(SharedEmbedder):
             return data
         return data
 
-    def encode_sync(
-        self, text: Union[str, List[str]]
-    ) -> Union[List[float], List[List[float]]]:
+    def encode_sync(self, text: str | list[str]) -> list[float] | list[list[float]]:
         return self._sync_post(text, "/embed")

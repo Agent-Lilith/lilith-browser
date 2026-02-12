@@ -1,7 +1,8 @@
 """Read Vivaldi (Chromium) History SQLite and Bookmarks JSON."""
+
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -14,7 +15,7 @@ def _chromium_time_to_utc(microseconds: int | None) -> datetime | None:
     if microseconds is None or microseconds <= 0:
         return None
     unix_sec = (microseconds / 1_000_000) - CHROMIUM_EPOCH_OFFSET_SEC
-    return datetime.fromtimestamp(unix_sec, tz=timezone.utc)
+    return datetime.fromtimestamp(unix_sec, tz=UTC)
 
 
 def _domain_from_url(url: str) -> str:
@@ -56,13 +57,15 @@ def read_history(profile_dir: Path) -> list[dict]:
         if not url:
             continue
         last_visit_time = _chromium_time_to_utc(r["last_visit_time"])
-        out.append({
-            "url": url,
-            "title": (r["title"] or "").strip() or None,
-            "last_visit_time": last_visit_time,
-            "visit_count": r["visit_count"] or 0,
-            "domain": _domain_from_url(url),
-        })
+        out.append(
+            {
+                "url": url,
+                "title": (r["title"] or "").strip() or None,
+                "last_visit_time": last_visit_time,
+                "visit_count": r["visit_count"] or 0,
+                "domain": _domain_from_url(url),
+            }
+        )
     return out
 
 
@@ -85,15 +88,17 @@ def _walk_bookmarks(node: dict, folder_path: str) -> list[dict]:
                     added_at = _chromium_time_to_utc(date_added)
                 else:
                     try:
-                        added_at = datetime.fromtimestamp(date_added / 1000.0, tz=timezone.utc)
+                        added_at = datetime.fromtimestamp(date_added / 1000.0, tz=UTC)
                     except (ValueError, OSError):
                         pass
-            out.append({
-                "url": url,
-                "title": title or None,
-                "folder": folder_path or None,
-                "added_at": added_at,
-            })
+            out.append(
+                {
+                    "url": url,
+                    "title": title or None,
+                    "folder": folder_path or None,
+                    "added_at": added_at,
+                }
+            )
         return out
 
     # Folder
@@ -119,6 +124,8 @@ def read_bookmarks(profile_dir: Path) -> list[dict]:
         node = roots.get(key)
         if not node:
             continue
-        folder_name = "Bookmarks bar" if key == "bookmark_bar" else key.replace("_", " ").title()
+        folder_name = (
+            "Bookmarks bar" if key == "bookmark_bar" else key.replace("_", " ").title()
+        )
         out.extend(_walk_bookmarks(node, folder_name))
     return out
