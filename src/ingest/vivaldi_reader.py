@@ -20,7 +20,12 @@ def _chromium_time_to_utc(microseconds: int | None) -> datetime | None:
 def _domain_from_url(url: str) -> str:
     try:
         netloc = urlparse(url).netloc
-        return netloc.lower() if netloc else ""
+        if not netloc:
+            return ""
+        domain = netloc.lower()
+        if domain.startswith("www."):
+            domain = domain[4:]
+        return domain
     except Exception:
         return ""
 
