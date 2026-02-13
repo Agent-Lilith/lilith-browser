@@ -17,6 +17,7 @@ def get_search_capabilities_tool() -> dict:
             {
                 "source_name": "browser_history",
                 "source_class": "personal",
+                "display_label": "Browser history",
                 "supported_methods": ["structured", "fulltext", "vector"],
                 "supported_filters": [
                     {
@@ -46,6 +47,7 @@ def get_search_capabilities_tool() -> dict:
             {
                 "source_name": "browser_bookmarks",
                 "source_class": "personal",
+                "display_label": "Browser bookmarks",
                 "supported_methods": ["structured", "fulltext", "vector"],
                 "supported_filters": [
                     {
