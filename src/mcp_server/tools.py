@@ -101,9 +101,9 @@ def search_browser_unified_tool(
         if mode == "count":
             total = 0
             if search_history:
-                total += HybridHistorySearchEngine(db, embedder).count(
-                    filters=filters
-                )["count"]
+                total += HybridHistorySearchEngine(db, embedder).count(filters=filters)[
+                    "count"
+                ]
             if search_bookmarks:
                 total += HybridBookmarkSearchEngine(db, embedder).count(
                     filters=filters

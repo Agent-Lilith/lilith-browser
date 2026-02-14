@@ -271,9 +271,11 @@ class HybridHistorySearchEngine(BaseHybridSearchEngine[HistoryEntry]):
             .where(HistoryEntry.domain != "")
         )
         stmt = _apply_history_filters(stmt, filters)
-        stmt = stmt.group_by(HistoryEntry.domain).order_by(
-            func.count().desc()
-        ).limit(top_n)
+        stmt = (
+            stmt.group_by(HistoryEntry.domain)
+            .order_by(func.count().desc())
+            .limit(top_n)
+        )
         rows = self.db.execute(stmt).all()
         aggregates = [
             {
@@ -442,9 +444,7 @@ class HybridBookmarkSearchEngine(BaseHybridSearchEngine[Bookmark]):
             .where(Bookmark.folder != "")
         )
         stmt = _apply_bookmark_filters(stmt, filters)
-        stmt = stmt.group_by(Bookmark.folder).order_by(func.count().desc()).limit(
-            top_n
-        )
+        stmt = stmt.group_by(Bookmark.folder).order_by(func.count().desc()).limit(top_n)
         rows = self.db.execute(stmt).all()
         aggregates = [
             {
