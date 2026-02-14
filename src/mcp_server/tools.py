@@ -1,5 +1,7 @@
 import logging
 
+from common.ranking import MCPScoreRanker
+
 from core.database import db_session
 from core.embeddings import Embedder
 from mcp_server.hybrid_search import (
@@ -152,22 +154,13 @@ def search_browser_unified_tool(
             timing_ms.update({f"bookmarks_{k}": v for k, v in t.items()})
             methods_executed = list(set(methods_executed + m))
 
-    # Browser-specific fusion for mixed sources
-    weights = {"structured": 1.0, "fulltext": 0.85, "vector": 0.7}
-
-    def _fused_score(r: dict) -> float:
-        scores = r.get("scores", {})
-        if not scores:
-            return 0.0
-        tw = sum(weights.get(meth, 0.5) for meth in scores)
-        ts = sum(scores[meth] * weights.get(meth, 0.5) for meth in scores)
-        return ts / tw if tw > 0 else 0.0
-
-    all_results.sort(key=_fused_score, reverse=True)
+    total_available = len(all_results)
+    ranker = MCPScoreRanker()
+    all_results = ranker.rank_results(all_results, top_k=top_k)
 
     return {
-        "results": all_results[:top_k],
-        "total_available": len(all_results),
+        "results": all_results,
+        "total_available": total_available,
         "methods_executed": methods_executed,
         "timing_ms": timing_ms,
         "error": None,

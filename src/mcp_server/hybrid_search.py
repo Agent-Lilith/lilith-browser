@@ -6,6 +6,7 @@ from datetime import date, datetime
 from datetime import time as dtime
 from typing import Any
 
+from common.ranking import MCPScoreRanker
 from sqlalchemy import func, literal_column, select
 
 from core.models import Bookmark, HistoryEntry
@@ -126,6 +127,7 @@ class HybridHistorySearchEngine(BaseHybridSearchEngine[HistoryEntry]):
     def __init__(self, db: Any, embedder: Any = None) -> None:
         self.db = db
         self.embedder = embedder
+        self._ranker = MCPScoreRanker()
 
     def search(
         self,
@@ -174,17 +176,14 @@ class HybridHistorySearchEngine(BaseHybridSearchEngine[HistoryEntry]):
                 logger.warning("Vector search failed: %s", e)
             timing["vector"] = round((time.monotonic() - t0) * 1000, 1)
 
-        fusion_results = []
+        fusion_results: list[dict[str, Any]] = []
         for res in all_results.values():
-            final_score = max(res["scores"].values())
             fusion_results.append(
-                (
-                    self._format_result(res["item"], res["scores"], res["methods"]),
-                    final_score,
-                )
+                self._format_result(res["item"], res["scores"], res["methods"])
             )
-        fusion_results.sort(key=lambda x: x[1], reverse=True)
-        results = [x[0] for x in fusion_results[:top_k]]
+        t_fusion = time.monotonic()
+        results = self._ranker.rank_results(fusion_results, top_k=top_k)
+        timing["fusion"] = round((time.monotonic() - t_fusion) * 1000, 1)
         timing["total"] = round((time.monotonic() - t_start) * 1000, 1)
         return results, timing, methods_executed
 
@@ -303,6 +302,7 @@ class HybridBookmarkSearchEngine(BaseHybridSearchEngine[Bookmark]):
     def __init__(self, db: Any, embedder: Any = None) -> None:
         self.db = db
         self.embedder = embedder
+        self._ranker = MCPScoreRanker()
 
     def search(
         self,
@@ -351,17 +351,14 @@ class HybridBookmarkSearchEngine(BaseHybridSearchEngine[Bookmark]):
                 logger.warning("Vector search failed: %s", e)
             timing["vector"] = round((time.monotonic() - t0) * 1000, 1)
 
-        fusion_results = []
+        fusion_results: list[dict[str, Any]] = []
         for res in all_results.values():
-            final_score = max(res["scores"].values())
             fusion_results.append(
-                (
-                    self._format_result(res["item"], res["scores"], res["methods"]),
-                    final_score,
-                )
+                self._format_result(res["item"], res["scores"], res["methods"])
             )
-        fusion_results.sort(key=lambda x: x[1], reverse=True)
-        results = [x[0] for x in fusion_results[:top_k]]
+        t_fusion = time.monotonic()
+        results = self._ranker.rank_results(fusion_results, top_k=top_k)
+        timing["fusion"] = round((time.monotonic() - t_fusion) * 1000, 1)
         timing["total"] = round((time.monotonic() - t_start) * 1000, 1)
         return results, timing, methods_executed
 
