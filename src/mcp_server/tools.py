@@ -1,7 +1,5 @@
 import logging
 
-from common.ranking import MCPScoreRanker
-
 from core.database import db_session
 from core.embeddings import Embedder
 from mcp_server.hybrid_search import (
@@ -89,78 +87,60 @@ def search_browser_unified_tool(
     methods: list[str] | None = None,
     filters: list[dict] | None = None,
     top_k: int = 10,
-    search_history: bool = True,
-    search_bookmarks: bool = True,
+    search_history: bool = False,
+    search_bookmarks: bool = False,
     mode: str = "search",
     group_by: str | None = None,
     aggregate_top_n: int = 10,
 ) -> dict:
+    if search_history == search_bookmarks:
+        raise ValueError(
+            "Exactly one browser source must be selected (search_history xor search_bookmarks)."
+        )
+
     top_k = min(max(1, top_k), 100)
     aggregate_top_n = min(max(1, aggregate_top_n), 100)
 
     with db_session() as db:
         embedder = Embedder()
+        source = "history" if search_history else "bookmarks"
         if mode == "count":
-            total = 0
-            if search_history:
-                total += HybridHistorySearchEngine(db, embedder).count(filters=filters)[
-                    "count"
-                ]
-            if search_bookmarks:
-                total += HybridBookmarkSearchEngine(db, embedder).count(
-                    filters=filters
-                )["count"]
-            return {
-                "results": [],
-                "total_available": total,
-                "count": total,
-                "mode": "count",
-                "methods_executed": ["count"],
-                "timing_ms": {},
-                "error": None,
-            }
+            if source == "history":
+                return HybridHistorySearchEngine(db, embedder).count(filters=filters)
+            return HybridBookmarkSearchEngine(db, embedder).count(filters=filters)
+
         if mode == "aggregate" and group_by:
-            if group_by == "domain" and search_history and not search_bookmarks:
+            if group_by == "domain" and source == "history":
                 return HybridHistorySearchEngine(db, embedder).aggregate(
                     group_by="domain",
                     filters=filters,
                     top_n=aggregate_top_n,
                 )
-            if group_by == "folder" and search_bookmarks and not search_history:
+            if group_by == "folder" and source == "bookmarks":
                 return HybridBookmarkSearchEngine(db, embedder).aggregate(
                     group_by="folder",
                     filters=filters,
                     top_n=aggregate_top_n,
                 )
-        all_results = []
+            raise ValueError(
+                f"group_by='{group_by}' is not supported for selected source '{source}'"
+            )
+
         timing_ms = {}
-        methods_executed: list[str] = []
-
-        if search_history:
+        if source == "history":
             engine = HybridHistorySearchEngine(db, embedder)
-            res, t, m = engine.search(
+            results, timing_ms, methods_executed = engine.search(
                 query=query, methods=methods, filters=filters, top_k=top_k
             )
-            all_results.extend(res)
-            timing_ms.update({f"history_{k}": v for k, v in t.items()})
-            methods_executed = list(set(methods_executed + m))
-
-        if search_bookmarks:
+        else:
             engine = HybridBookmarkSearchEngine(db, embedder)
-            res, t, m = engine.search(
+            results, timing_ms, methods_executed = engine.search(
                 query=query, methods=methods, filters=filters, top_k=top_k
             )
-            all_results.extend(res)
-            timing_ms.update({f"bookmarks_{k}": v for k, v in t.items()})
-            methods_executed = list(set(methods_executed + m))
-
-    total_available = len(all_results)
-    ranker = MCPScoreRanker()
-    all_results = ranker.rank_results(all_results, top_k=top_k)
 
     return {
-        "results": all_results,
-        "total_available": total_available,
+        "results": results,
+        "total_available": len(results),
         "methods_executed": methods_executed,
         "timing_ms": timing_ms,
         "error": None,

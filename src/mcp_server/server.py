@@ -21,13 +21,13 @@ def unified_search(
     methods: list[str] | None = None,
     filters: list[dict] | None = None,
     top_k: int = 10,
-    search_history: bool = True,
-    search_bookmarks: bool = True,
+    search_history: bool = False,
+    search_bookmarks: bool = False,
     mode: str = "search",
     group_by: str | None = None,
     aggregate_top_n: int = 10,
 ) -> dict:
-    """Hybrid search over browser history and bookmarks. Supports search, count, aggregate."""
+    """Hybrid search for exactly one browser source (history or bookmarks)."""
     return search_browser_unified_tool(
         query=query,
         methods=methods,
