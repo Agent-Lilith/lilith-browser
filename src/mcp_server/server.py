@@ -23,8 +23,11 @@ def unified_search(
     top_k: int = 10,
     search_history: bool = True,
     search_bookmarks: bool = True,
+    mode: str = "search",
+    group_by: str | None = None,
+    aggregate_top_n: int = 10,
 ) -> dict:
-    """Hybrid search over browser history and bookmarks."""
+    """Hybrid search over browser history and bookmarks. Supports search, count, aggregate."""
     return search_browser_unified_tool(
         query=query,
         methods=methods,
@@ -32,6 +35,9 @@ def unified_search(
         top_k=top_k,
         search_history=search_history,
         search_bookmarks=search_bookmarks,
+        mode=mode,
+        group_by=group_by,
+        aggregate_top_n=aggregate_top_n,
     )
 
 

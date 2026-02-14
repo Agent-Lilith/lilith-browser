@@ -43,6 +43,8 @@ def get_search_capabilities_tool() -> dict:
                 "default_limit": 10,
                 "sort_fields": ["last_visit_time", "relevance"],
                 "default_ranking": "vector",
+                "supported_modes": ["search", "count", "aggregate"],
+                "supported_group_by_fields": ["domain"],
             },
             {
                 "source_name": "browser_bookmarks",
@@ -73,6 +75,8 @@ def get_search_capabilities_tool() -> dict:
                 "default_limit": 10,
                 "sort_fields": ["added_at", "relevance"],
                 "default_ranking": "vector",
+                "supported_modes": ["search", "count", "aggregate"],
+                "supported_group_by_fields": ["folder"],
             },
         ],
     }
@@ -85,14 +89,51 @@ def search_browser_unified_tool(
     top_k: int = 10,
     search_history: bool = True,
     search_bookmarks: bool = True,
+    mode: str = "search",
+    group_by: str | None = None,
+    aggregate_top_n: int = 10,
 ) -> dict:
     top_k = min(max(1, top_k), 100)
-    all_results = []
-    timing_ms = {}
-    methods_executed: list[str] = []
+    aggregate_top_n = min(max(1, aggregate_top_n), 100)
 
     with db_session() as db:
         embedder = Embedder()
+        if mode == "count":
+            total = 0
+            if search_history:
+                total += HybridHistorySearchEngine(db, embedder).count(
+                    filters=filters
+                )["count"]
+            if search_bookmarks:
+                total += HybridBookmarkSearchEngine(db, embedder).count(
+                    filters=filters
+                )["count"]
+            return {
+                "results": [],
+                "total_available": total,
+                "count": total,
+                "mode": "count",
+                "methods_executed": ["count"],
+                "timing_ms": {},
+                "error": None,
+            }
+        if mode == "aggregate" and group_by:
+            if group_by == "domain" and search_history and not search_bookmarks:
+                return HybridHistorySearchEngine(db, embedder).aggregate(
+                    group_by="domain",
+                    filters=filters,
+                    top_n=aggregate_top_n,
+                )
+            if group_by == "folder" and search_bookmarks and not search_history:
+                return HybridBookmarkSearchEngine(db, embedder).aggregate(
+                    group_by="folder",
+                    filters=filters,
+                    top_n=aggregate_top_n,
+                )
+        all_results = []
+        timing_ms = {}
+        methods_executed: list[str] = []
+
         if search_history:
             engine = HybridHistorySearchEngine(db, embedder)
             res, t, m = engine.search(

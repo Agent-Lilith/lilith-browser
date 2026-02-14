@@ -241,6 +241,59 @@ class HybridHistorySearchEngine(BaseHybridSearchEngine[HistoryEntry]):
     ) -> dict[str, Any]:
         return _history_to_result(item, scores, methods)
 
+    def count(self, filters: list[dict] | None = None) -> dict:
+        """Return total count of matching history entries."""
+        stmt = select(func.count()).select_from(HistoryEntry)
+        stmt = _apply_history_filters(stmt, filters)
+        total = self.db.execute(stmt).scalar() or 0
+        return {
+            "count": total,
+            "results": [],
+            "total_available": total,
+            "mode": "count",
+            "methods_executed": ["count"],
+            "timing_ms": {},
+            "error": None,
+        }
+
+    def aggregate(
+        self,
+        group_by: str,
+        filters: list[dict] | None = None,
+        top_n: int = 10,
+    ) -> dict:
+        """Return top groups by count. group_by: domain."""
+        if group_by != "domain":
+            return {"results": [], "aggregates": [], "mode": "aggregate", "error": None}
+        stmt = (
+            select(HistoryEntry.domain, func.count().label("cnt"))
+            .where(HistoryEntry.domain.isnot(None))
+            .where(HistoryEntry.domain != "")
+        )
+        stmt = _apply_history_filters(stmt, filters)
+        stmt = stmt.group_by(HistoryEntry.domain).order_by(
+            func.count().desc()
+        ).limit(top_n)
+        rows = self.db.execute(stmt).all()
+        aggregates = [
+            {
+                "group_value": str(row[0] or ""),
+                "count": row[1],
+                "label": str(row[0] or ""),
+                "metadata": {},
+            }
+            for row in rows
+        ]
+        return {
+            "results": [],
+            "total_available": 0,
+            "mode": "aggregate",
+            "aggregates": aggregates,
+            "methods_executed": ["aggregate"],
+            "timing_ms": {},
+            "error": None,
+        }
+
 
 class HybridBookmarkSearchEngine(BaseHybridSearchEngine[Bookmark]):
     """Hybrid search over bookmarks: structured + fulltext + vector."""
@@ -358,3 +411,56 @@ class HybridBookmarkSearchEngine(BaseHybridSearchEngine[Bookmark]):
         self, item: Bookmark, scores: dict[str, float], methods: list[str]
     ) -> dict[str, Any]:
         return _bookmark_to_result(item, scores, methods)
+
+    def count(self, filters: list[dict] | None = None) -> dict:
+        """Return total count of matching bookmarks."""
+        stmt = select(func.count()).select_from(Bookmark)
+        stmt = _apply_bookmark_filters(stmt, filters)
+        total = self.db.execute(stmt).scalar() or 0
+        return {
+            "count": total,
+            "results": [],
+            "total_available": total,
+            "mode": "count",
+            "methods_executed": ["count"],
+            "timing_ms": {},
+            "error": None,
+        }
+
+    def aggregate(
+        self,
+        group_by: str,
+        filters: list[dict] | None = None,
+        top_n: int = 10,
+    ) -> dict:
+        """Return top groups by count. group_by: folder."""
+        if group_by != "folder":
+            return {"results": [], "aggregates": [], "mode": "aggregate", "error": None}
+        stmt = (
+            select(Bookmark.folder, func.count().label("cnt"))
+            .where(Bookmark.folder.isnot(None))
+            .where(Bookmark.folder != "")
+        )
+        stmt = _apply_bookmark_filters(stmt, filters)
+        stmt = stmt.group_by(Bookmark.folder).order_by(func.count().desc()).limit(
+            top_n
+        )
+        rows = self.db.execute(stmt).all()
+        aggregates = [
+            {
+                "group_value": str(row[0] or ""),
+                "count": row[1],
+                "label": str(row[0] or ""),
+                "metadata": {},
+            }
+            for row in rows
+        ]
+        return {
+            "results": [],
+            "total_available": 0,
+            "mode": "aggregate",
+            "aggregates": aggregates,
+            "methods_executed": ["aggregate"],
+            "timing_ms": {},
+            "error": None,
+        }
