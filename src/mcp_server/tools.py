@@ -12,12 +12,17 @@ logger = logging.getLogger(__name__)
 
 def get_search_capabilities_tool() -> dict:
     return {
-        "schema_version": "1.0",
+        "schema_version": "1.2",
         "sources": [
             {
                 "source_name": "browser_history",
                 "source_class": "personal",
                 "display_label": "Browser history",
+                "alias_hints": ["history"],
+                "freshness_window_days": 1,
+                "latency_tier": "low",
+                "quality_tier": "high",
+                "cost_tier": "low",
                 "supported_methods": ["structured", "fulltext", "vector"],
                 "supported_filters": [
                     {
@@ -50,6 +55,11 @@ def get_search_capabilities_tool() -> dict:
                 "source_name": "browser_bookmarks",
                 "source_class": "personal",
                 "display_label": "Browser bookmarks",
+                "alias_hints": ["bookmarks"],
+                "freshness_window_days": 1,
+                "latency_tier": "low",
+                "quality_tier": "high",
+                "cost_tier": "low",
                 "supported_methods": ["structured", "fulltext", "vector"],
                 "supported_filters": [
                     {
